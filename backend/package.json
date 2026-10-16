@@ -1,0 +1,12 @@
+{
+  "name": "@dropmine/backend",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "tsx watch --env-file-if-exists=../.env src/index.ts",
+    "build": "tsc --noEmit && tsup src/index.ts --format esm --platform node --out-dir dist --clean",
+    "start": "node --env-file-if-exists=../.env dist/index.js"
+  },
+  "dependencies": { "express": "^5.1.0", "ws": "^8.18.0", "zod": "^4.0.0" },
+  "devDependencies": { "@types/express": "^5.0.0" }
+}
