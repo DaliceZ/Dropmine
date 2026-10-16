@@ -7,6 +7,9 @@
   "engines": { "node": ">=22.12.0" },
   "scripts": {
     "typecheck": "tsc --noEmit",
+    "test:redis": "node scripts/test-redis.mjs",
+    "test:e2e:redis": "npm run build -w frontend && node scripts/test-redis.mjs --e2e",
+    "vercel-build": "tsx scripts/check-deployment.ts && npm run typecheck && npm run build -w frontend",
     "dev": "concurrently -k -n backend,frontend \"npm run dev -w backend\" \"npm run dev -w frontend\"",
     "build": "npm run build -w frontend && npm run build -w backend",
     "start": "npm run start -w backend",

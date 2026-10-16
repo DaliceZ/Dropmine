@@ -2,8 +2,8 @@ import { createHmac, randomBytes } from 'node:crypto';
 import { isIP } from 'node:net';
 import type { IncomingMessage } from 'node:http';
 
-export function initNetworkGroup(proxyHops: number) {
-  const secret = randomBytes(32);
+export function initNetworkGroup(proxyHops: number, sharedSecret?: string) {
+  const secret = sharedSecret ?? randomBytes(32);
   return (request: IncomingMessage) => {
     const forwarded = proxyHops ? String(request.headers['x-forwarded-for'] ?? '').split(',').map(value => value.trim()).filter(Boolean) : [];
     const chain = [...forwarded, request.socket.remoteAddress ?? ''];

@@ -1,6 +1,6 @@
 # Dropmine
 
-เว็บส่งไฟล์ระหว่างมือถือและคอมพิวเตอร์ผ่าน WebRTC โดยไม่เก็บไฟล์บนเซิร์ฟเวอร์ ไม่ต้องสมัครสมาชิกและไม่มีฐานข้อมูล
+เว็บส่งไฟล์ระหว่างมือถือและคอมพิวเตอร์ผ่าน WebRTC โดยไม่เก็บไฟล์บนเซิร์ฟเวอร์และไม่ต้องสมัครสมาชิก โหมด local ใช้ RAM ส่วน production บน Vercel ใช้ Redis เก็บเฉพาะสถานะชั่วคราวพร้อมวันหมดอายุ
 
 ## เริ่มใช้งาน
 
@@ -43,11 +43,15 @@ backend/
       peer.type.ts                   device/transfer types
       services/peer.service.ts       discovery, pairing และสิทธิ์การส่ง
     repos/session.repo.ts            อุปกรณ์และรายการส่งใน Map ชั่วคราว
+    repos/redis-session.repo.ts      shared state + atomic commit + Pub/Sub สำหรับ Vercel
+    modules/peer/services/redis-peer.service.ts  ใช้ business rules เดิมใน shared transaction
     infrastructures/websocket/       การส่งข้อความผ่าน socket
     middlewares/                     security headers
     errors/
     utils/                           network grouping
 shared/protocol.ts                   สัญญาข้อความและข้อจำกัดที่ใช้ร่วมกัน
+api/ws.ts                            Vercel WebSocket Function
+api/health.ts                        health check ของ Vercel + Redis
 tests/
   backend/                           validation, permissions และ lifecycle
   e2e/                               การส่งจริงระหว่าง browser contexts
@@ -80,7 +84,8 @@ tests/
 - Public IP เดียวกันไม่ได้ยืนยัน Wi-Fi เดียวกัน: shared NAT อาจทำให้เจอคนละเครือข่าย ส่วน VPN/IPv6 อาจทำให้เครื่องในบ้านเดียวกันไม่เจอกัน ใช้ QR เป็นทางเลือก
 - QR ช่วยค้นพบและจับคู่เท่านั้น ไม่ได้แก้ firewall, client isolation หรือเครือข่ายที่บล็อก WebRTC
 - ยังไม่มี TURN relay หากเชื่อมตรงไม่ได้จะแจ้งให้ลองใหม่ ไม่มีการ fallback ไปอัปโหลดไฟล์
-- ใช้ node server หนึ่ง instance เพราะข้อมูลอยู่ใน RAM การ restart จะยกเลิกการจับคู่และการส่งที่กำลังดำเนินอยู่
+- โหมด RAM ใช้ node server หนึ่ง instance; โหมด Vercel ใช้ Redis แชร์สถานะข้าม instance ได้ แต่การ reconnect/restart ยังอาจยกเลิกการจับคู่และการส่งที่กำลังดำเนินอยู่ ยังไม่มี resume
+- Vercel Function ตั้งอายุ WebSocket ไว้ 300 วินาที ต้องทดสอบรายการส่งนานกว่า 5 นาทีก่อนเปิดใช้งานจริง
 - ต้องเปิดหน้าเว็บและหน้าจอมือถือไว้ หากหลุดต้องส่งใหม่ ยังไม่มี resume
 - รับไฟล์ใน RAM จึงจำกัดขนาดไว้ก่อน แม้ต่ำกว่าเพดานก็ขึ้นกับหน่วยความจำอุปกรณ์
 - ยังไม่ได้ยืนยันกับ iPhone/Safari และ Android เครื่องจริง การทดสอบอัตโนมัติใช้ Chromium พร้อม viewport มือถือ
@@ -88,7 +93,7 @@ tests/
 
 ## Production
 
-**Vercel:** ใช้ frontend บน Vercel และ backend แบบหนึ่ง instance แยกต่างหาก เพื่อคงเงื่อนไขไม่ใช้ฐานข้อมูล ดูขั้นตอนและ checklist ใน [docs/deployment.md](docs/deployment.md) ตั้ง `VITE_SIGNALING_URL=wss://your-backend-domain/ws` ใน Vercel และ `PUBLIC_ORIGIN` บน backend ให้ตรงกับโดเมนหน้าเว็บ
+**Vercel ทั้ง frontend และ backend:** ดู [docs/deployment.md](docs/deployment.md) ใช้ Vercel WebSocket Function + Upstash Redis เก็บสถานะชั่วคราว ตั้ง `REDIS_URL`, `REDIS_NAMESPACE`, `NETWORK_GROUP_SECRET` และ `PUBLIC_ORIGIN` ใน Vercel ไม่ต้องตั้ง `VITE_SIGNALING_URL` เมื่อ deploy เป็นโปรเจกต์เดียวกัน ไฟล์ยังส่งตรงระหว่างเบราว์เซอร์ ไม่ถูกเก็บใน Redis
 
 **โฮสต์รวมบน Node server:**
 
@@ -114,9 +119,13 @@ Reverse proxy/hosting provider อาจมี access logs ของตัวเ
 npm run build
 npm run typecheck
 npm test
+npm run test:redis
+npm run test:e2e:redis
 npx playwright install chromium
 npm run test:e2e
 npm audit
 ```
 
 E2E ใช้ browser contexts แยกกัน ส่งไฟล์หลายไฟล์รวมไฟล์ว่างและชื่อภาษาไทย ตรวจ SHA-256 ของไฟล์ที่ดาวน์โหลด ส่งกลับอีกทิศทาง ปฏิเสธ ยกเลิก จับคู่เครื่องที่ซ่อนตัว และตรวจ layout มือถือ/desktop
+
+`npm run test:redis` ต้องมี `redis-server` ใน PATH หรือกำหนด `REDIS_SERVER_BIN` เป็น path ของ binary จะเปิด Redis ทดสอบชั่วคราวโดยไม่บันทึกลงดิสก์ ส่วน `npm test` จะข้าม integration tests ของ Redis หากไม่ได้ตั้ง `TEST_REDIS_URL` ห้ามตั้งค่านี้ชี้ไป production

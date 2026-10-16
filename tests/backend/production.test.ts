@@ -7,6 +7,17 @@ import { Socket } from 'node:net';
 import { initUpgradeLimit } from '../../backend/src/middlewares/upgrade-limit';
 
 describe('production configuration', () => {
+  it('requires shared Redis configuration on Vercel and rejects insecure production endpoints', () => {
+    expect(() => readEnv({ VERCEL: '1' })).toThrow('REDIS_URL');
+    expect(() => readEnv({ REDIS_URL: 'redis://localhost:6379' })).toThrow('NETWORK_GROUP_SECRET');
+    expect(() => readEnv({ REDIS_URL: 'not-a-url' })).toThrow('REDIS_URL');
+    expect(() => readEnv({ NODE_ENV: 'production', PUBLIC_ORIGIN: 'https://drop.example', REDIS_URL: 'redis://localhost:6379' })).toThrow('rediss://');
+    const source = { NODE_ENV: 'production', VERCEL: '1', PUBLIC_ORIGIN: 'https://drop.example', REDIS_URL: 'rediss://default:secret@redis.example:6379', NETWORK_GROUP_SECRET: 'a'.repeat(64), REDIS_NAMESPACE: 'production' };
+    expect(readEnv(source).trustProxyHops).toBe(1);
+    expect(() => readEnv({ ...source, REDIS_NAMESPACE: 'bad namespace' })).toThrow('REDIS_NAMESPACE');
+    expect(() => readEnv({ ...source, REDIS_NAMESPACE: '' })).toThrow('REDIS_NAMESPACE');
+    expect(() => readEnv({ ...source, NETWORK_GROUP_SECRET: 'short' })).toThrow('NETWORK_GROUP_SECRET');
+  });
   it('bounds handshake rate and limiter memory, then releases expired groups', () => {
     const limiter = initUpgradeLimit(2, 2);
     expect(limiter.allow('one', 0)).toBe(true);

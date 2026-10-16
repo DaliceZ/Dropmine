@@ -1,9 +1,16 @@
 {
   "$schema": "https://openapi.vercel.sh/vercel.json",
   "framework": "vite",
-  "installCommand": "npm ci",
-  "buildCommand": "npm run build -w frontend",
+  "installCommand": "npm ci --include=dev",
+  "buildCommand": "npm run vercel-build",
   "outputDirectory": "frontend/dist",
+  "functions": {
+    "api/ws.ts": { "maxDuration": 300 },
+    "api/health.ts": { "maxDuration": 10 }
+  },
+  "rewrites": [
+    { "source": "/ws", "destination": "/api/ws" }
+  ],
   "headers": [
     {
       "source": "/(.*)",

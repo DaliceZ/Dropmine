@@ -7,6 +7,13 @@
     "build": "tsc --noEmit && tsup src/index.ts --format esm --platform node --out-dir dist --clean",
     "start": "node --env-file-if-exists=../.env dist/index.js"
   },
-  "dependencies": { "express": "^5.1.0", "ws": "^8.18.0", "zod": "^4.0.0" },
-  "devDependencies": { "@types/express": "^5.0.0" }
+  "dependencies": {
+    "express": "^5.1.0",
+    "redis": "^6.3.0",
+    "ws": "^8.18.0",
+    "zod": "^4.0.0"
+  },
+  "devDependencies": {
+    "@types/express": "^5.0.0"
+  }
 }

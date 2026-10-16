@@ -1,109 +1,121 @@
-# Production: Vercel + standalone signaling
+# Deploy Dropmine on Vercel with Upstash Redis
 
-## Architecture
+## What runs where
 
-```text
-Phone / computer ── HTTPS ── Vercel (frontend)
-       │
-       ├── WSS ── one Node.js signaling instance (metadata in RAM)
-       │
-       └── WebRTC DataChannel ── other device (file bytes)
+- Frontend: Vercel static hosting (Vite).
+- Signaling: Node.js WebSocket Function at `/api/ws`; `/ws` rewrites to it.
+- Shared presence/pairing: Upstash Redis over TLS, isolated by environment.
+- File bytes: WebRTC DataChannel directly between browsers. No upload endpoint, file storage or TURN relay is added.
+
+Vercel WebSockets are currently Beta. Enable Fluid Compute. The configured function duration is 300 seconds, including on Hobby with Fluid Compute. Clients reconnect automatically, but active transfers/pairings can be interrupted when a connection ends: this version has no session/transfer resume. Test this limit against your intended file sizes and network speeds before launch.
+
+References: [WebSockets](https://vercel.com/docs/functions/websockets), [Function duration](https://vercel.com/docs/functions/configuring-functions/duration), [Vite](https://vercel.com/docs/frameworks/frontend/vite).
+
+## 1. Create a Redis database
+
+Create an Upstash Redis database in your account, or through Vercel Marketplace. Choose the Free plan explicitly if appropriate; creating a database and selecting billing are manual account-owner steps.
+
+Copy the **TCP/TLS connection string** (`rediss://...`), not the REST API URL/token. The application uses Redis commands and Pub/Sub with the Node Redis client.
+
+Do not paste the connection string into chat, source code, a public repository or any `VITE_*` variable. It contains the database password. Store it only in server-side environment variables. Prefer a Redis region near the Vercel Function region.
+
+[Upstash pricing](https://upstash.com/pricing/redis) has separate free and paid plans. Do not assume storage size determines cost: connection activity, presence refreshes, Pub/Sub and commands also consume usage. No plan or spending change is performed by this repository.
+
+## 2. Import the repository into Vercel
+
+| Setting | Value |
+| --- | --- |
+| Root Directory | Repository root, not `frontend` |
+| Framework Preset | Vite |
+| Install Command | `npm ci --include=dev` |
+| Build Command | `npm run vercel-build` |
+| Output Directory | `frontend/dist` |
+| Node.js | 22.x |
+| Fluid Compute | Enabled |
+
+The checked-in `vercel.json` configures the Functions, rewrite, security headers and asset caching. Do not remove the root `api/` directory or configure the backend as a second Vercel project.
+
+## 3. Configure environment variables
+
+Set these in the Vercel project's **Production** environment before deployment:
+
+```dotenv
+PUBLIC_ORIGIN=https://your-project.vercel.app
+REDIS_URL=rediss://default:YOUR_PASSWORD@YOUR_ENDPOINT:6379
+REDIS_NAMESPACE=production
+NETWORK_GROUP_SECRET=YOUR_RANDOM_SECRET
+TRUST_PROXY_HOPS=1
 ```
 
-No database, uploads, file storage or TURN relay is added. The signaling service still sees temporary names, file metadata, connection information and pairing state. Do not enable request/message payload logging. Hosting providers may retain their own network/access logs.
+Generate `NETWORK_GROUP_SECRET` locally:
 
-Vercel supports WebSockets in Beta, but new connections can land on different instances. Its documentation requires external coordination for distributed presence/rooms. This application deliberately uses one separate long-running backend to preserve the no-database requirement. Do not deploy the current in-memory backend as a Vercel Function or enable multiple replicas.
+```sh
+node -e "console.log(require('node:crypto').randomBytes(32).toString('hex'))"
+```
 
-References: [Vercel WebSockets](https://vercel.com/docs/functions/websockets), [Vite on Vercel](https://vercel.com/docs/frameworks/frontend/vite).
+- `PUBLIC_ORIGIN` must exactly match the canonical frontend origin, with no trailing slash or path. Redirect other domains to it. When switching to a custom domain, update this variable and redeploy.
+- All instances in one environment must share the same `REDIS_NAMESPACE` and `NETWORK_GROUP_SECRET`. The secret hashes network addresses consistently across instances; never expose it to browsers.
+- Namespaces allow letters, digits, hyphens and underscores. Change the namespace when deploying incompatible protocol/state changes.
+- `TRUST_PROXY_HOPS=1` uses the Vercel-managed forwarded address. Outside Vercel, only enable this behind a verified trusted proxy that sanitizes headers and cannot be bypassed. See [Vercel request headers](https://vercel.com/docs/headers/request-headers).
+- Leave `VITE_SIGNALING_URL` **unset** for this same-project deployment. Browsers use their own origin's `/ws`. This variable remains available only for a separately hosted backend.
+- Optional `STUN_URL=stun:your-stun-host:3478` enables NAT discovery. It does not add TURN or guarantee connectivity through VPNs, client-isolated Wi-Fi or restrictive firewalls.
+- Do not set `PORT` or `SERVE_FRONTEND` on Vercel. Vercel manages the Function HTTP server; the frontend is served statically.
+- Production builds validate Redis/TLS, origin, namespace and shared secret. Missing configuration fails the build instead of silently falling back to local RAM.
 
-## 1. Backend
+Preview environments must use a separate database (recommended), namespace, secret and exact allowed preview origin. Do not expose production Redis credentials to untrusted preview code. Do not allow arbitrary `*.vercel.app` origins.
 
-Use a service that supports a continuously running Node.js process, HTTPS, WebSocket upgrades, and exactly **one instance**. Disable scale-to-zero/automatic sleeping for continuous discovery. No persistent disk is required. Configure the provider's health check as `GET /api/health`.
+## Temporary data and limits
 
-For a Node.js deployment, run from the repository root:
+Redis stores names, visibility, network hashes, pairing tokens, leases and transfer authorization state. It does **not** persist file bytes, filenames, SDP, ICE candidates or transfer history. Filenames and connection negotiation pass transiently through signaling/Pub/Sub; provider logs/backups are outside the application's control.
+
+State uses an atomic compare-and-set plus Pub/Sub: two instances cannot independently accept conflicting transfer requests or publish events from a failed write. Per-socket messages are processed in order. Disconnected sessions are removed normally; crashed instances are cleaned up by 90-second presence leases. A quiet shared state key expires after 180 seconds without refresh. Upgrade counters expire after 60 seconds. No Redis polling runs when an instance has no local sockets.
+
+This first distributed implementation intentionally caps 200 connected devices globally, 30 devices per network group and 30 QR pairings per device. It uses a bounded shared snapshot rather than an unlimited-scale presence system. Larger deployments need partitioning/load testing. The in-memory local mode retains its original 1,000-device cap and is not allowed on Vercel.
+
+Redis/Pub/Sub failures terminate local sockets so clients reconnect rather than continuing with inconsistent state. Redis quota exhaustion is an outage, not an automatic upgrade or an upload fallback.
+
+## Validate before release
 
 ```sh
 npm ci
-npm run build -w backend
-npm run start -w backend
+npm run typecheck
+npm run build
+npm test
+npm run test:redis
+npm run test:e2e
+npm run test:e2e:redis
+npm audit
 ```
 
-Use Node.js 22.12+ (the repository pins a tested version in `.nvmrc`). Set runtime variables in the hosting dashboard, not in source control:
+`npm run test:redis` requires a locally available `redis-server`, or its absolute path in `REDIS_SERVER_BIN`. It launches a loopback-only ephemeral Redis with persistence disabled and removes the temporary test directory afterwards. Alternatively, set `TEST_REDIS_URL` to a **dedicated test database** and run `npm test`. Redis integration tests exercise administrative connection-kill commands and must never run against production.
 
-```dotenv
-NODE_ENV=production
-PUBLIC_ORIGIN=https://your-frontend.vercel.app
-SERVE_FRONTEND=false
-TRUST_PROXY_HOPS=1
-STUN_URL=
-```
+GitHub Actions provides a dedicated Redis service and runs these integration tests automatically. Ordinary `npm test` skips Redis integration tests if `TEST_REDIS_URL` is absent.
 
-`PUBLIC_ORIGIN` is the exact frontend origin, with **no trailing slash**. When adding a custom domain, change it to that canonical domain and redirect other frontend domains to it. The backend rejects foreign origins, preview deployments and same-host origin fallbacks when a production origin is configured. Use an isolated backend for previews; do not allow arbitrary `*.vercel.app` origins.
+`npm run test:e2e:redis` also requires `redis-server`. It runs the browser transfer suite against the built frontend and two isolated backend instances with round-robin WebSocket routing and shared Redis. This verifies actual file bytes and cross-instance signaling locally, but does not emulate Vercel's TLS/routing/runtime limits.
 
-`TRUST_PROXY_HOPS=1` is only an example for **one verified, trusted reverse proxy**. Check your provider's actual topology and forwarded-header handling. Use `0` for a directly exposed Node server. Only trust forwarded IPs when external clients cannot bypass the proxy and the proxy sanitizes the header. Wrong settings can group unrelated users together or prevent discovery. Do not use proxying through Vercel for the WebSocket endpoint; browsers connect directly to the backend.
+After deploying:
 
-`PORT` defaults to 3001; use the port assigned by your host. Terminate TLS at a trusted proxy and expose `wss://your-backend-domain/ws`. Set the proxy's WebSocket idle timeout above the application's 15-second heartbeat. Do not cache WebSocket upgrades or `/api/health`.
+1. Check `https://your-domain/api/health` returns `{"ok":true}`; Redis failure should return 503 without exposing configuration.
+2. Check the browser's `/ws` handshake returns 101 and reaches the same Vercel project.
+3. Test discovery, hide/show, QR, accept/decline/cancel, both transfer directions and downloaded file bytes.
+4. Verify foreign origins cannot connect, and check CSP/mixed-content errors.
+5. Test real iPhone/Safari and Android/Chrome, screen locking, backgrounding and network interruption. Chromium viewport tests are not real-device certification.
+6. Leave sessions open past five minutes and test long transfers explicitly. Reconnection is automatic; transfer resume is not implemented.
+7. Monitor Vercel compute/network usage and Redis commands/bandwidth/connections. Keep provider-level abuse protection enabled. Origin checks do not authenticate non-browser clients.
 
-Optional `STUN_URL=stun:your-stun-server:3478` enables NAT discovery; leave empty for direct local candidates only. This does not add TURN. Test target networks before choosing a STUN provider. Without TURN, some VPNs, firewalls and isolated Wi-Fi networks cannot transfer files; QR pairing cannot fix that.
+No real Vercel deployment or Upstash account/database is created automatically. A successful local build/test does not verify live Vercel routing, Upstash TLS/permissions, plan eligibility or billing settings.
 
-### Docker alternative
+## Optional standalone mode
 
-Build from the repository root:
+The existing Node/Docker deployment remains supported for a separately hosted backend. Without Redis, it must run as one instance. Set `PUBLIC_ORIGIN` to the frontend origin, configure trusted proxy hops correctly and use `VITE_SIGNALING_URL=wss://your-backend-domain/ws` for the frontend.
 
 ```sh
 docker build -t dropmine-signaling .
 docker run --rm --init --name dropmine-signaling \
   -p 127.0.0.1:3001:3001 \
-  -e PUBLIC_ORIGIN=https://your-frontend.vercel.app \
+  -e PUBLIC_ORIGIN=https://your-frontend-domain \
   -e TRUST_PROXY_HOPS=1 \
   dropmine-signaling
 ```
 
-Put this behind a trusted HTTPS/WebSocket reverse proxy. The loopback mapping is intentional: do not expose the Node port publicly while trusting proxy headers. The image runs as a non-root user and includes a health check. For managed container platforms, let the platform route to the container's assigned `PORT` instead of using this local port mapping.
-
-## 2. Vercel frontend
-
-Import the repository into Vercel and use these settings:
-
-| Setting | Value |
-| --- | --- |
-| Root Directory | Repository root (not `frontend`) |
-| Framework Preset | Vite |
-| Install Command | `npm ci` |
-| Build Command | `npm run build -w frontend` |
-| Output Directory | `frontend/dist` |
-| Node.js version | 22.x |
-
-`vercel.json` contains the build/output settings, security headers and cache policy. Keep this project static: no Express entry point or Functions are required on Vercel.
-
-Set this **public, build-time** environment variable in Vercel:
-
-```dotenv
-VITE_SIGNALING_URL=wss://your-backend-domain/ws
-```
-
-Enable it only for environments that have an appropriate backend. Redeploy after changing it. Never place credentials or secrets in `VITE_*` variables; they are embedded in the JavaScript bundle. Builds on Vercel fail early if the endpoint is missing or insecure. The backend URL must end in `/ws`, without query parameters, fragment, username or password.
-
-Do not set the backend-only `NODE_ENV`, `PUBLIC_ORIGIN`, `TRUST_PROXY_HOPS` or `STUN_URL` on the Vercel frontend. Production HTTP headers allow encrypted WebSocket connections; the backend's exact origin check is the authorization boundary for browser signaling connections. Origin checks do not authenticate non-browser clients, so keep hosting-level abuse protection enabled as well.
-
-## 3. Release checklist
-
-- Run `npm ci`, `npm run typecheck`, `npm run build`, `npm test`, `npm run test:e2e` and `npm audit`.
-- Verify `https://your-backend-domain/api/health` returns `{ "ok": true }` without exposing application state.
-- Open the Vercel frontend in two browser sessions and verify the `/ws` request uses the configured backend and returns status 101.
-- Verify discovery from two real devices on the same network, hide/show toggle, QR pairing, acceptance/decline/cancel and both transfer directions.
-- Compare downloaded bytes; a successful receive is not the same as saving to the device.
-- Test real Safari/iOS and Chrome/Android, with screen lock/backgrounding and network interruption. Automated viewport tests are not a substitute for real-device tests.
-- Verify an unapproved frontend origin cannot open a WebSocket.
-- Restart the backend and verify clients reconnect. Active transfers/pairings are not resumable and can be interrupted during deploys; reconnect uses bounded exponential backoff with jitter.
-- Confirm only one backend instance is running, automatic sleeping is disabled, TLS certificates renew, and provider logs do not capture file metadata or pairing messages.
-- Check production headers and the browser console for CSP/mixed-content errors. Hashed assets cache for a year; the HTML entry point revalidates.
-- Set provider-level resource/connection limits and alerts before public launch. The application caps 1,000 devices globally, 30 devices per network group, 120 upgrade attempts per group per minute, 180 messages per socket per 10 seconds, and 96 KiB per signaling message. Shared NAT users share the network limits.
-
-GitHub Actions validates builds, types, unit/integration tests, production dependency audit and Chromium E2E checks when this repository is pushed to GitHub. Vercel credentials are not stored in CI.
-
-## Rollback and limits
-
-Keep the previous frontend deployment and backend image/version available. Frontend and backend must use compatible versions of `shared/protocol.ts`; release them together if that protocol changes. A backend rollback/restart clears all in-memory discovery and pairing state and interrupts active transfers. A single backend is intentionally not a high-availability architecture.
-
-This configuration prepares deployment; it does not create cloud projects, purchase hosting, provision domains/TLS, or verify a live deployment. Those steps require your chosen backend host and actual production URLs.
+Place that loopback-only port behind a trusted HTTPS/WebSocket proxy. Do not expose Node directly while trusting forwarded headers. The container runs as a non-root user and has a health check. Docker is an alternative, not required for the all-Vercel setup.

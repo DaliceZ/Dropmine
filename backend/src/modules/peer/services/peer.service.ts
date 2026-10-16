@@ -55,6 +55,7 @@ export function initPeerService(repo: ISessionRepo, send: SendMessage, iceServer
       if (message.type === 'pair') {
         const target = repo.listDevices().find(value => value.token === message.token && value.expires > Date.now());
         if (!target || target.id === device.id) throw new AppError('ลิงก์จับคู่ไม่ถูกต้องหรือหมดอายุแล้ว');
+        if ((!device.paired.has(target.id) && device.paired.size >= 30) || (!target.paired.has(device.id) && target.paired.size >= 30)) throw new AppError('จับคู่ได้สูงสุด 30 อุปกรณ์');
         device.paired.add(target.id);
         target.paired.add(device.id);
         repo.saveDevice(device);

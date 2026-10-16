@@ -10,9 +10,6 @@ export default defineConfig(({ command, mode }) => {
   if (command === 'build' && environment.VITE_SIGNALING_URL) {
     resolveSignalingUrl(environment.VITE_SIGNALING_URL, 'https://dropmine.example', true);
   }
-  if (command === 'build' && process.env.VERCEL && !environment.VITE_SIGNALING_URL) {
-    throw new Error('Set VITE_SIGNALING_URL=wss://your-backend-domain/ws before deploying to Vercel');
-  }
   return {
   envDir,
   plugins: [react(), tailwindcss()],

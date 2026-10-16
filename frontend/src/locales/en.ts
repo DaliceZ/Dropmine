@@ -1,4 +1,7 @@
 export const english: Record<string, string> = {
+  'จับคู่ได้สูงสุด 30 อุปกรณ์': 'You can pair with up to 30 devices.',
+  'ระบบกำลังมีผู้ใช้จำนวนมาก กรุณาลองใหม่': 'The service is busy. Please try again.',
+  'เชื่อมต่อบ่อยเกินไป กรุณารอสักครู่': 'Too many connection attempts. Please wait a moment.',
   'ตั้งค่าการเชื่อมต่อไม่ถูกต้อง กรุณาติดต่อผู้ดูแล': 'Connection configuration is invalid. Please contact the administrator.',
   "ไม่เกิน 50 ไฟล์ต่อครั้ง": "Up to 50 files at a time",
   บันทึกชื่อ: "Save name",
