@@ -1,0 +1,3 @@
+export const PRESENCE_REFRESH_MS = 60_000;
+export const PRESENCE_LEASE_MS = 180_000;
+export const PRESENCE_STATE_TTL_SECONDS = 360;

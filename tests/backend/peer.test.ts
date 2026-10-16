@@ -24,6 +24,41 @@ function setup() {
 afterEach(() => vi.useRealTimers());
 
 describe('peer service permissions and lifecycle', () => {
+  it('notifies only changed peer views and always initializes the profiling device', () => {
+    const { service, sender, receiver, outsider, messages } = setup();
+    service.handle(receiver.id, { type: 'profile', name: 'Renamed', visible: true, kind: 'mobile' });
+    expect(messages.filter(item => item.message.type === 'peers').map(item => item.to).sort()).toEqual([sender.id, receiver.id].sort());
+    expect(messages.some(item => item.to === outsider.id)).toBe(false);
+    messages.length = 0;
+    service.handle(receiver.id, { type: 'profile', name: 'Renamed', visible: true, kind: 'mobile' });
+    expect(messages.map(item => item.to)).toEqual([receiver.id]);
+    const hidden = service.connect('network-a');
+    messages.length = 0;
+    service.handle(hidden.id, { type: 'profile', name: 'New device', visible: false, kind: 'desktop' });
+    expect(messages).toHaveLength(1);
+    expect(messages[0].message).toMatchObject({ type: 'peers', peers: expect.arrayContaining([expect.objectContaining({ id: sender.id })]) });
+    messages.length = 0;
+    service.disconnect(hidden.id);
+    expect(messages).toHaveLength(0);
+  });
+  it('updates hidden cross-network pairs without notifying unrelated devices', () => {
+    const { service, sender, receiver, outsider, messages } = setup();
+    service.handle(outsider.id, { type: 'profile', name: 'Hidden', visible: false, kind: 'mobile' });
+    messages.length = 0;
+    service.handle(sender.id, { type: 'pair', token: outsider.hello.token });
+    expect(messages.filter(item => item.message.type === 'peers').map(item => item.to).sort()).toEqual([sender.id, outsider.id].sort());
+    messages.length = 0;
+    service.handle(sender.id, { type: 'pair', token: outsider.hello.token });
+    expect(messages.every(item => item.message.type === 'paired')).toBe(true);
+    messages.length = 0;
+    service.handle(outsider.id, { type: 'profile', name: 'Renamed hidden', visible: false, kind: 'mobile' });
+    expect(messages.some(item => item.to === sender.id && item.message.type === 'peers' && item.message.peers.some(peer => peer.name === 'Renamed hidden'))).toBe(true);
+    expect(messages.some(item => item.to === receiver.id)).toBe(false);
+    messages.length = 0;
+    service.disconnect(outsider.id);
+    expect(messages.map(item => item.to)).toEqual([sender.id]);
+    expect(messages[0].message).toEqual({ type: 'peers', peers: [expect.objectContaining({ id: receiver.id })] });
+  });
   it('discovers only visible devices in the same group', () => {
     const { service, sender, receiver, outsider, messages } = setup();
     service.handle(receiver.id, { type: 'profile', name: 'Phone', visible: false, kind: 'mobile' });

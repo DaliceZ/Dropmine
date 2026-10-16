@@ -7,8 +7,16 @@ import type { Device, SendMessage, Transfer } from '../peer.type.js';
 export function initPeerService(repo: ISessionRepo, send: SendMessage, iceServers: RTCIceServer[] = []) {
   const peer = (device: Device): Peer => ({ id: device.id, name: device.name, kind: device.kind });
   const canSee = (device: Device, target: Device) => target.visible && target.group === device.group || device.paired.has(target.id);
-  function broadcast() {
-    for (const device of repo.listDevices()) send(device.id, { type: 'peers', peers: repo.listDevices().filter(target => target.id !== device.id && canSee(device, target)).map(peer) });
+  function peerViews(devices: Device[]) {
+    const targets = repo.listDevices();
+    return new Map(devices.map(device => [device.id, JSON.stringify(targets.filter(target => target.id !== device.id && canSee(device, target)).map(peer))]));
+  }
+  function broadcast(previous: Map<string, string>, forceId?: string) {
+    const devices = [...previous.keys()].map(id => repo.getDevice(id)).filter((device): device is Device => Boolean(device));
+    const current = peerViews(devices);
+    for (const [id, view] of current) {
+      if (id === forceId || previous.get(id) !== view) send(id, { type: 'peers', peers: JSON.parse(view) as Peer[] });
+    }
   }
   function end(transfer: Transfer, reason: Extract<ServerMessage, { type: 'ended' }>['reason']) {
     repo.deleteTransfer(transfer.id);
@@ -32,19 +40,23 @@ export function initPeerService(repo: ISessionRepo, send: SendMessage, iceServer
       return { id: device.id, hello: { type: 'hello', self: peer(device), token: device.token, expires: device.expires, iceServers } satisfies ServerMessage };
     },
     disconnect(deviceId: string) {
+      const device = repo.getDevice(deviceId);
+      if (!device) return;
+      const previous = peerViews(repo.listDevices().filter(target => target.id !== deviceId && canSee(target, device)));
       repo.deleteDevice(deviceId);
-      for (const target of repo.listDevices()) { target.paired.delete(deviceId); repo.saveDevice(target); }
+      for (const target of repo.listDevices()) if (target.paired.delete(deviceId)) repo.saveDevice(target);
       for (const transfer of repo.listTransfers()) if ([transfer.sender, transfer.receiver].includes(deviceId)) end(transfer, 'disconnected');
-      broadcast();
+      broadcast(previous);
     },
     expire() { for (const transfer of repo.listTransfers()) if (transfer.expires < Date.now()) end(transfer, 'timeout'); },
     handle(deviceId: string, message: ClientMessage) {
       const device = repo.getDevice(deviceId);
       if (!device) throw new AppError('ไม่พบอุปกรณ์');
       if (message.type === 'profile') {
+        const previous = peerViews(repo.listDevices().filter(target => target.id === device.id || target.group === device.group || target.paired.has(device.id)));
         Object.assign(device, { name: message.name, visible: message.visible, kind: message.kind });
         repo.saveDevice(device);
-        broadcast();
+        broadcast(previous, device.id);
         return;
       }
       if (message.type === 'rotate-pair') {
@@ -56,13 +68,14 @@ export function initPeerService(repo: ISessionRepo, send: SendMessage, iceServer
         const target = repo.listDevices().find(value => value.token === message.token && value.expires > Date.now());
         if (!target || target.id === device.id) throw new AppError('ลิงก์จับคู่ไม่ถูกต้องหรือหมดอายุแล้ว');
         if ((!device.paired.has(target.id) && device.paired.size >= 30) || (!target.paired.has(device.id) && target.paired.size >= 30)) throw new AppError('จับคู่ได้สูงสุด 30 อุปกรณ์');
+        const previous = peerViews([device, target]);
         device.paired.add(target.id);
         target.paired.add(device.id);
         repo.saveDevice(device);
         repo.saveDevice(target);
         send(device.id, { type: 'paired', peer: peer(target) });
         send(target.id, { type: 'paired', peer: peer(device) });
-        broadcast();
+        broadcast(previous);
         return;
       }
       if (message.type === 'request') {

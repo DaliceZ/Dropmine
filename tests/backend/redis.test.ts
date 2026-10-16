@@ -15,6 +15,18 @@ describe.skipIf(!process.env.TEST_REDIS_URL)('distributed Redis signaling', () =
   let messages: Array<{ instance: string; to: string; message: ServerMessage }>;
   let clock: number;
   const stateKey = () => `dropmine:{${namespace}}:state:v1`;
+  async function commandCounts() {
+    const info = await client.info('commandstats');
+    const counts = { get: 0, eval: 0, set: 0, publish: 0 };
+    for (const match of info.matchAll(/cmdstat_(get|eval|set|publish):calls=(\d+)/g)) counts[match[1] as keyof typeof counts] = Number(match[2]);
+    return counts;
+  }
+  async function measure(operation: () => Promise<void>) {
+    const before = await commandCounts();
+    await operation();
+    const after = await commandCounts();
+    return Object.fromEntries(Object.keys(before).map(command => [command, after[command as keyof typeof after] - before[command as keyof typeof before]]));
+  }
   function instance(name: string, isolatedNamespace = namespace, unavailable = vi.fn()) {
     const service = initRedisPeerService({ url, namespace: isolatedNamespace, now: () => clock, unavailable, send: (to, message) => messages.push({ instance: name, to, message }) });
     services.push(service);
@@ -54,7 +66,7 @@ describe.skipIf(!process.env.TEST_REDIS_URL)('distributed Redis signaling', () =
     expect(stored).not.toContain('private-filename');
     expect(stored).not.toContain('private-sdp');
     expect(await client.ttl(stateKey())).toBeGreaterThan(0);
-    expect(await client.ttl(stateKey())).toBeLessThanOrEqual(180);
+    expect(await client.ttl(stateKey())).toBeLessThanOrEqual(360);
     await second.handle(receiver.id, { type: 'complete', id: 'transfer-redis' });
     await expect.poll(() => messages.filter(delivery => delivery.instance === 'one' && delivery.to === sender.id && delivery.message.type === 'ended').length).toBe(1);
     expect(JSON.parse((await client.get(stateKey()))!).transfers).toHaveLength(0);
@@ -74,6 +86,89 @@ describe.skipIf(!process.env.TEST_REDIS_URL)('distributed Redis signaling', () =
     await expect.poll(() => messages.filter(delivery => delivery.instance === 'two' && delivery.message.type === 'incoming').length).toBe(1);
   });
 
+  it('measures Redis operations for one accepted signal', async () => {
+    const service = instance('one');
+    const sender = await service.connect('network');
+    const receiver = await service.connect('network');
+    await service.handle(receiver.id, { type: 'profile', name: 'Phone', visible: true, kind: 'mobile' });
+    await service.handle(sender.id, { type: 'request', id: 'measured-signal', target: receiver.id, files: [{ name: 'file', size: 1 }] });
+    await service.handle(receiver.id, { type: 'respond', id: 'measured-signal', accept: true });
+    const counts = await measure(async () => {
+      await service.handle(sender.id, { type: 'signal', id: 'measured-signal', signal: { description: { type: 'offer', sdp: 'sdp' } } });
+    });
+    console.log('Redis operations per signal:', counts);
+    expect(counts).toEqual({ get: 1, eval: 1, set: 0, publish: 1 });
+  });
+
+  it('measures idle presence operations over two minutes', async () => {
+    const service = instance('one');
+    const device = await service.connect('network');
+    await service.expire([device.id]);
+    const counts = await measure(async () => {
+      for (let tick = 0; tick < 4; tick++) {
+        clock += 30_000;
+        await service.expire([device.id]);
+      }
+    });
+    console.log('Redis idle operations over 120 seconds:', counts);
+    expect(counts).toEqual({ get: 4, eval: 2, set: 2, publish: 0 });
+  });
+
+  it('relays in both directions without rewriting state, leases or TTL', async () => {
+    const first = instance('one');
+    const second = instance('two');
+    const sender = await first.connect('network');
+    const receiver = await second.connect('network');
+    await second.handle(receiver.id, { type: 'profile', name: 'Phone', visible: true, kind: 'mobile' });
+    await first.handle(sender.id, { type: 'request', id: 'read-only', target: receiver.id, files: [{ name: 'file', size: 1 }] });
+    await second.handle(receiver.id, { type: 'respond', id: 'read-only', accept: true });
+    const before = await client.get(stateKey());
+    await client.expire(stateKey(), 100);
+    await first.handle(sender.id, { type: 'signal', id: 'read-only', signal: { description: { type: 'offer', sdp: 'offer' } } });
+    await second.handle(receiver.id, { type: 'signal', id: 'read-only', signal: { description: { type: 'answer', sdp: 'answer' } } });
+    await expect.poll(() => messages.filter(delivery => delivery.message.type === 'signal').length).toBe(4);
+    expect(await client.get(stateKey())).toBe(before);
+    expect(await client.ttl(stateKey())).toBeGreaterThan(0);
+    expect(await client.ttl(stateKey())).toBeLessThanOrEqual(100);
+  });
+
+  it('rejects unauthorized, expired and revoked signal relays without publishing', async () => {
+    const service = instance('one');
+    const sender = await service.connect('network');
+    const receiver = await service.connect('network');
+    const outsider = await service.connect('other');
+    await service.handle(receiver.id, { type: 'profile', name: 'Phone', visible: true, kind: 'mobile' });
+    await service.handle(sender.id, { type: 'request', id: 'secure-relay', target: receiver.id, files: [{ name: 'file', size: 1 }] });
+    const signal = { type: 'signal' as const, id: 'secure-relay', signal: { description: { type: 'offer' as const, sdp: 'offer' } } };
+    await expect(service.handle(sender.id, signal)).rejects.toThrow('ยังไม่ได้รับอนุญาต');
+    await service.handle(receiver.id, { type: 'respond', id: signal.id, accept: true });
+    const original = (await client.get(stateKey()))!;
+    const counts = await measure(async () => {
+      await expect(service.handle(outsider.id, signal)).rejects.toThrow('ไม่พบรายการ');
+      await expect(service.handle('unknown', signal)).rejects.toThrow('ไม่พบอุปกรณ์');
+      await expect(service.handle(sender.id, { ...signal, id: 'missing' })).rejects.toThrow('ไม่พบรายการ');
+      for (const expired of ['transfer', 'sender', 'receiver']) {
+        const state = JSON.parse(original);
+        if (expired === 'transfer') state.transfers[0].expires = clock - 1;
+        else state.leases[expired === 'sender' ? sender.id : receiver.id] = clock;
+        await client.set(stateKey(), JSON.stringify(state), { EX: 360 });
+        await expect(service.handle(sender.id, signal)).rejects.toThrow();
+      }
+    });
+    expect(counts.publish).toBe(0);
+    await client.set(stateKey(), original, { EX: 360 });
+    await service.handle(receiver.id, { type: 'complete', id: signal.id });
+    const revoked = await measure(async () => { await expect(service.handle(sender.id, signal)).rejects.toThrow('ไม่พบรายการ'); });
+    expect(revoked.publish).toBe(0);
+    await client.set(stateKey(), original, { EX: 360 });
+    await service.handle(sender.id, { type: 'cancel', id: signal.id });
+    await expect(service.handle(receiver.id, signal)).rejects.toThrow('ไม่พบรายการ');
+    await client.set(stateKey(), JSON.stringify({ ...JSON.parse(original), version: 2 }), { EX: 360 });
+    await expect(service.handle(sender.id, signal)).rejects.toThrow('Unsupported');
+    await client.del(stateKey());
+    await expect(service.handle(sender.id, signal)).rejects.toThrow('ไม่พบอุปกรณ์');
+  });
+
   it('removes crashed devices by lease and notifies the surviving peer', async () => {
     const first = instance('one');
     const second = instance('two');
@@ -81,9 +176,9 @@ describe.skipIf(!process.env.TEST_REDIS_URL)('distributed Redis signaling', () =
     const receiver = await second.connect('network');
     await second.handle(receiver.id, { type: 'profile', name: 'Phone', kind: 'mobile', visible: true });
     await first.handle(sender.id, { type: 'request', id: 'crashed-transfer', target: receiver.id, files: [{ name: 'one', size: 1 }] });
-    clock += 60_000;
+    clock += 120_000;
     await second.expire([receiver.id]);
-    clock += 31_000;
+    clock += 61_000;
     await second.expire([receiver.id]);
     const state = JSON.parse((await client.get(stateKey()))!);
     expect(state.devices.map((device: { id: string }) => device.id)).toEqual([receiver.id]);

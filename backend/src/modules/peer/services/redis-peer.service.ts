@@ -1,4 +1,5 @@
 import type { ClientMessage } from '../../../../../shared/protocol.js';
+import { PRESENCE_LEASE_MS, PRESENCE_REFRESH_MS } from '../../../config/presence.js';
 import { AppError } from '../../../errors/app-error.js';
 import { initRedisSessionRepo, type Delivery, type StoredState } from '../../../repos/redis-session.repo.js';
 import { initSessionRepo, type ISessionRepo } from '../../../repos/session.repo.js';
@@ -54,7 +55,7 @@ export function initRedisPeerService(options: { url: string; namespace: string; 
       return transact((service, repo, leases) => {
         if (repo.listDevices().length >= 200) throw new AppError('มีอุปกรณ์เชื่อมต่อมากเกินไป');
         const session = service.connect(group);
-        leases[session.id] = now() + 90_000;
+        leases[session.id] = now() + PRESENCE_LEASE_MS;
         return session;
       });
     },
@@ -62,14 +63,24 @@ export function initRedisPeerService(options: { url: string; namespace: string; 
       if (repo.getDevice(deviceId)) service.disconnect(deviceId);
       delete leases[deviceId];
     }),
-    handle: (deviceId: string, message: ClientMessage) => transact((service, _repo, leases) => {
-      service.handle(deviceId, message);
-      leases[deviceId] = now() + 90_000;
-    }),
+    async handle(deviceId: string, message: ClientMessage) {
+      if (message.type === 'signal') {
+        const result = await shared.relay(deviceId, message, now());
+        if (result === 'ok') return;
+        if (result === 'version') throw new Error('Unsupported signaling state version');
+        if (result === 'device') throw new AppError('ไม่พบอุปกรณ์');
+        if (result === 'permission') throw new AppError('ยังไม่ได้รับอนุญาตให้เชื่อมต่อ');
+        throw new AppError('ไม่พบรายการส่งไฟล์');
+      }
+      await transact((service, _repo, leases) => {
+        service.handle(deviceId, message);
+        leases[deviceId] = now() + PRESENCE_LEASE_MS;
+      });
+    },
     async expire(localIds = []) {
-      if (now() - lastMaintenance < 30_000) return;
+      if (now() - lastMaintenance < PRESENCE_REFRESH_MS) return;
       await transact((_service, repo, leases) => {
-        for (const id of localIds) if (repo.getDevice(id)) leases[id] = now() + 90_000;
+        for (const id of localIds) if (repo.getDevice(id)) leases[id] = now() + PRESENCE_LEASE_MS;
       });
       lastMaintenance = now();
     },
