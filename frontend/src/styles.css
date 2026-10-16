@@ -796,6 +796,54 @@ h1 {
   font-size: 12px;
   font-variant-numeric: tabular-nums;
 }
+.discovery-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px 12px;
+  margin-bottom: 4px;
+}
+.device-refresh {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  flex-shrink: 0;
+  min-width: 96px;
+  min-height: 44px;
+  padding: 0 10px;
+  border: 1px solid transparent;
+  border-radius: 7px;
+  background: var(--accent-soft);
+  color: var(--accent);
+  font-size: 12px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.device-refresh:hover:not(:disabled) {
+  border-color: var(--accent-border);
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+.device-refresh:disabled {
+  opacity: 1;
+  color: var(--subtle);
+  background: transparent;
+}
+.device-refresh[aria-busy="true"] svg {
+  animation: device-refresh-spin 1s linear infinite;
+}
+@keyframes device-refresh-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .device-refresh[aria-busy="true"] svg {
+    animation: none;
+  }
+}
 .device-count {
   display: grid;
   place-items: center;
@@ -819,10 +867,15 @@ h1 {
 }
 .discovery-status {
   display: flex;
+  flex: 1;
+  min-width: 0;
   align-items: center;
   gap: 7px;
   color: var(--subtle);
   font-size: 12px;
+}
+.discovery-status svg {
+  flex-shrink: 0;
 }
 .empty-devices {
   flex: 1;

@@ -14,6 +14,7 @@ export const peerMessageSchema = z.discriminatedUnion('type', [
   z.object({ type: z.literal('profile'), name: z.string().trim().min(1).max(40).transform(name => name.replace(/[\x00-\x1f\x7f]/g, '').trim()).pipe(z.string().min(1)), visible: z.boolean(), kind: z.enum(['mobile', 'desktop']) }),
   z.object({ type: z.literal('pair'), token: z.string().regex(/^[\w-]{32}$/) }),
   z.object({ type: z.literal('rotate-pair') }),
+  z.object({ type: z.literal('refresh-peers') }),
   z.object({ type: z.literal('request'), target: z.string().uuid(), id: transferId, files: z.array(fileSchema).min(1).max(MAX_FILES).refine(files => files.reduce((total, file) => total + file.size, 0) <= MAX_BYTES) }),
   z.object({ type: z.literal('respond'), id: transferId, accept: z.boolean() }),
   z.object({ type: z.literal('signal'), id: transferId, signal: signalSchema }),

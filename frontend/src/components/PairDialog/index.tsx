@@ -47,7 +47,6 @@ export function PairDialog({
     return () => clearInterval(timer);
   }, []);
   const seconds = Math.max(0, Math.ceil((state.expires - now) / 1000));
-  const local = ["localhost", "127.0.0.1", "[::1]"].includes(location.hostname);
   async function copy() {
     try {
       await navigator.clipboard.writeText(url);
@@ -81,13 +80,6 @@ export function PairDialog({
             })
           : t("กดสร้างใหม่เพื่อรับลิงก์ใหม่")}
       </p>
-      {local && (
-        <p className="notice">
-          {t(
-            "ลิงก์ localhost ใช้ได้บนคอมเครื่องนี้เท่านั้น หากจะสแกนจากมือถือ ให้เปิดเว็บผ่าน LAN IP หรือโดเมน HTTPS ก่อน",
-          )}
-        </p>
-      )}
       <label className="field-label" htmlFor="own-link">
         {t("ลิงก์จับคู่ของคุณ")}
       </label>

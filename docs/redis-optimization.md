@@ -6,6 +6,7 @@
 - Extend device leases from 90 to 180 seconds and snapshot TTL from 180 to 360 seconds. Normal socket disconnects still remove devices immediately. An abruptly stopped instance can leave devices visible until their lease expires and another instance runs maintenance; with no surviving instances the snapshot expires instead.
 - Relay SDP/ICE through one atomic Lua script instead of a snapshot read/compare-and-set transaction. The script checks the current state version, device membership, receiver acceptance, transfer expiry and both presence leases before publishing. Cancellation/completion and relay authorization remain serialized by Redis. Signals do not refresh leases or snapshot TTL; periodic maintenance does that.
 - Send peer lists only to affected network/paired devices whose views changed. A profile message still returns the profiling device's current peer list, including on first registration. Pub/Sub itself remains shared across backend instances.
+- Manual device refresh reads the shared snapshot once and responds only to the requesting socket, without writes or Pub/Sub. Both the browser and backend enforce a 10-second cooldown per session; the backend limiter is instance-local because a WebSocket remains attached to its serving instance. Reconnecting creates a new session and is still subject to the upgrade rate limit. Refresh does not restart the connection or interrupt transfers.
 
 ## Measured results
 

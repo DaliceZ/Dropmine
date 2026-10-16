@@ -1,6 +1,7 @@
 import {
   MAX_BYTES,
   MAX_FILES,
+  PEER_REFRESH_COOLDOWN_MS,
   type ClientMessage,
   type Peer,
   type ServerMessage,
@@ -27,6 +28,9 @@ export class Dropmine {
     visible: true,
     selfId: "",
     peers: [],
+    refreshingPeers: false,
+    peerRefreshUntil: 0,
+    peersRefreshedAt: 0,
     pairedIds: [],
     token: "",
     expires: 0,
@@ -40,6 +44,7 @@ export class Dropmine {
   private reconnect?: ReturnType<typeof setTimeout>;
   private reconnectDelay = 1000;
   private watchdog?: ReturnType<typeof setTimeout>;
+  private peerRefreshTimeout?: ReturnType<typeof setTimeout>;
   private stopped = false;
   private peerConnection?: RTCPeerConnection;
   private channel?: RTCDataChannel;
@@ -100,10 +105,11 @@ export class Dropmine {
   stop = () => {
     this.stopped = true;
     clearTimeout(this.reconnect);
+    clearTimeout(this.peerRefreshTimeout);
     this.socket?.close();
     this.cleanup();
     this.clearDownloads();
-    this.update({ transfer: null, history: [] });
+    this.update({ transfer: null, history: [], refreshingPeers: false });
   };
   private connect() {
     if (this.stopped) return;
@@ -131,11 +137,14 @@ export class Dropmine {
     socket.onclose = () => {
       clearTimeout(connectionTimeout);
       if (this.socket !== socket || this.stopped) return;
+      clearTimeout(this.peerRefreshTimeout);
       if (isActive(this.state.transfer))
         this.fail("การเชื่อมต่อขาด กรุณาส่งใหม่อีกครั้ง", false);
       this.update({
         connected: false,
         peers: [],
+        refreshingPeers: false,
+        peersRefreshedAt: 0,
         pairedIds: [],
         token: "",
         expires: 0,
@@ -168,6 +177,19 @@ export class Dropmine {
   }
   rotatePair = () => {
     if (this.state.connected) this.send({ type: "rotate-pair" });
+  };
+  refreshPeers = () => {
+    if (!this.state.connected || this.state.refreshingPeers || Date.now() < this.state.peerRefreshUntil) return;
+    try {
+      this.send({ type: "refresh-peers" });
+      this.update({ refreshingPeers: true, peerRefreshUntil: Date.now() + PEER_REFRESH_COOLDOWN_MS, peersRefreshedAt: 0 });
+      clearTimeout(this.peerRefreshTimeout);
+      this.peerRefreshTimeout = setTimeout(() => {
+        this.update({ refreshingPeers: false, error: "รีเฟรชไม่สำเร็จ กรุณาลองอีกครั้ง" });
+      }, 8000);
+    } catch {
+      this.update({ refreshingPeers: false, error: "รีเฟรชไม่สำเร็จ กรุณาลองอีกครั้ง" });
+    }
   };
   pair = (text: string) => {
     try {
@@ -274,7 +296,12 @@ export class Dropmine {
         this.send({ type: "pair", token: this.pairToken });
         this.pairToken = "";
       }
-    } else if (message.type === "peers") this.update({ peers: message.peers });
+    } else if (message.type === "peers") {
+      if (message.refreshed && this.state.refreshingPeers) {
+        clearTimeout(this.peerRefreshTimeout);
+        this.update({ peers: message.peers, refreshingPeers: false, peersRefreshedAt: Date.now() });
+      } else this.update({ peers: message.peers });
+    }
     else if (message.type === "pair-token")
       this.update({ token: message.token, expires: message.expires });
     else if (message.type === "paired")

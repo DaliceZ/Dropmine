@@ -26,6 +26,9 @@ export type Snapshot = {
   visible: boolean;
   selfId: string;
   peers: Peer[];
+  refreshingPeers: boolean;
+  peerRefreshUntil: number;
+  peersRefreshedAt: number;
   pairedIds: string[];
   token: string;
   expires: number;

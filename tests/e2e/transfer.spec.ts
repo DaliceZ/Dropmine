@@ -139,6 +139,7 @@ test('pairs by QR link while hidden and removes devices after leaving', async ({
   await host.getByRole('switch').click();
   await host.getByRole('button', { name: /เชื่อมต่อด้วย QR/ }).first().click();
   await expect(host.getByAltText('QR Code สำหรับจับคู่กับอุปกรณ์นี้')).toBeVisible();
+  await expect(host.getByText(/ลิงก์ localhost ใช้ได้บนคอมเครื่องนี้เท่านั้น/)).toHaveCount(0);
   const link = await host.getByLabel('ลิงก์จับคู่ของคุณ', { exact: true }).inputValue();
   await guest.goto(link);
   await expect(guest.getByRole('button', { name: /Hidden Desktop/ })).toBeVisible();

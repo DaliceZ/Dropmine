@@ -24,6 +24,16 @@ function setup() {
 afterEach(() => vi.useRealTimers());
 
 describe('peer service permissions and lifecycle', () => {
+  it('refreshes only the requesting device with a ten-second cooldown', () => {
+    vi.useFakeTimers();
+    const { service, sender, receiver, messages, handler } = setup();
+    handler.message(sender.id, JSON.stringify({ type: 'refresh-peers' }));
+    expect(messages).toEqual([{ to: sender.id, message: { type: 'peers', peers: [expect.objectContaining({ id: receiver.id })], refreshed: true } }]);
+    expect(() => service.handle(sender.id, { type: 'refresh-peers' })).toThrow('10 วินาที');
+    expect(() => service.handle(receiver.id, { type: 'refresh-peers' })).not.toThrow();
+    vi.advanceTimersByTime(10_000);
+    expect(() => service.handle(sender.id, { type: 'refresh-peers' })).not.toThrow();
+  });
   it('notifies only changed peer views and always initializes the profiling device', () => {
     const { service, sender, receiver, outsider, messages } = setup();
     service.handle(receiver.id, { type: 'profile', name: 'Renamed', visible: true, kind: 'mobile' });

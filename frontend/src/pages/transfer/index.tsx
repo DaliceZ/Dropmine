@@ -19,6 +19,7 @@ import type { Peer } from "../../../../shared/protocol";
 import { Dialog } from "../../components/Dialog";
 import { CompletionToast } from "../../components/CompletionToast";
 import { DeviceIdentity } from "../../components/DeviceIdentity";
+import { DeviceRefresh } from "../../components/DeviceRefresh";
 import { LanguageDropdown } from "../../components/LanguageDropdown";
 import { PairDialog } from "../../components/PairDialog";
 import { ReceiveDialog } from "../../components/ReceiveDialog";
@@ -308,15 +309,32 @@ export function TransferPage() {
                   </span>
                 </div>
                 <div className="devices-body">
-                  <div className="discovery-status">
-                    <Radio size={14} aria-hidden="true" />
-                    <span>
-                      {t(
-                        state.connected
-                          ? "ค้นหาอุปกรณ์อัตโนมัติ"
-                          : "กำลังเชื่อมต่อ",
-                      )}
-                    </span>
+                  <div className="discovery-toolbar">
+                    <div
+                      className="discovery-status"
+                      role="status"
+                      aria-live="polite"
+                      aria-atomic="true"
+                    >
+                      <Radio size={14} aria-hidden="true" />
+                      <span>
+                        {t(
+                          state.connected
+                            ? state.refreshingPeers
+                              ? "กำลังอัปเดตรายชื่ออุปกรณ์"
+                              : state.peersRefreshedAt
+                                ? "อัปเดตรายชื่อแล้ว"
+                                : "ค้นหาอุปกรณ์อัตโนมัติ"
+                            : "กำลังเชื่อมต่อ",
+                        )}
+                      </span>
+                    </div>
+                    <DeviceRefresh
+                      connected={state.connected}
+                      refreshing={state.refreshingPeers}
+                      cooldownUntil={state.peerRefreshUntil}
+                      onRefresh={service.refreshPeers}
+                    />
                   </div>
                   {state.peers.length ? (
                     <div className="device-list">

@@ -1,4 +1,13 @@
 export const english: Record<string, string> = {
+  รีเฟรช: "Refresh",
+  รีเฟรชอุปกรณ์: "Refresh devices",
+  กำลังรีเฟรช: "Refreshing",
+  "รอ {seconds} วิ": "Wait {seconds}s",
+  "รีเฟรชได้อีกใน {seconds} วินาที": "Refresh again in {seconds} seconds",
+  กำลังอัปเดตรายชื่ออุปกรณ์: "Refreshing device list",
+  อัปเดตรายชื่อแล้ว: "List updated",
+  "รีเฟรชไม่สำเร็จ กรุณาลองอีกครั้ง": "Could not refresh. Please try again.",
+  "กรุณารอ 10 วินาทีก่อนรีเฟรชอีกครั้ง": "Please wait 10 seconds before refreshing again.",
   'จับคู่ได้สูงสุด 30 อุปกรณ์': 'You can pair with up to 30 devices.',
   'ระบบกำลังมีผู้ใช้จำนวนมาก กรุณาลองใหม่': 'The service is busy. Please try again.',
   'เชื่อมต่อบ่อยเกินไป กรุณารอสักครู่': 'Too many connection attempts. Please wait a moment.',
@@ -110,8 +119,6 @@ export const english: Record<string, string> = {
   "QR หมดอายุแล้ว": "QR code expired",
   "ลิงก์หมดอายุใน {time} นาที": "Link expires in {time}",
   กดสร้างใหม่เพื่อรับลิงก์ใหม่: "Generate a new link to continue.",
-  "ลิงก์ localhost ใช้ได้บนคอมเครื่องนี้เท่านั้น หากจะสแกนจากมือถือ ให้เปิดเว็บผ่าน LAN IP หรือโดเมน HTTPS ก่อน":
-    "A localhost link only works on this computer. To scan from a phone, open Dropmine using a LAN IP or HTTPS domain first.",
   ลิงก์จับคู่ของคุณ: "Your pairing link",
   คัดลอกแล้ว: "Copied",
   คัดลอกลิงก์: "Copy link",

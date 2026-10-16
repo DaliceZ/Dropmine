@@ -6,10 +6,12 @@ import { initSessionRepo, type ISessionRepo } from '../../../repos/session.repo.
 import type { SendMessage } from '../peer.type.js';
 import type { PeerService } from './peer-service.type.js';
 import { initPeerService } from './peer.service.js';
+import { initRefreshCooldown } from './refresh-cooldown.js';
 
 export function initRedisPeerService(options: { url: string; namespace: string; send: SendMessage; unavailable: () => void; iceServers?: RTCIceServer[]; now?: () => number }): PeerService {
   const shared = initRedisSessionRepo(options);
   const now = options.now ?? Date.now;
+  const refreshCooldown = initRefreshCooldown();
   let lastMaintenance = 0;
 
   async function transact<Result>(operation: (service: ReturnType<typeof initPeerService>, repo: ISessionRepo, leases: Record<string, number>) => Result): Promise<Result> {
@@ -64,6 +66,20 @@ export function initRedisPeerService(options: { url: string; namespace: string; 
       delete leases[deviceId];
     }),
     async handle(deviceId: string, message: ClientMessage) {
+      if (message.type === 'refresh-peers') {
+        refreshCooldown(deviceId, now());
+        const raw = await shared.read();
+        const state: StoredState | null = raw ? JSON.parse(raw) : null;
+        if (state && state.version !== 1) throw new Error('Unsupported signaling state version');
+        const timestamp = now();
+        const device = state?.devices.find(device => device.id === deviceId && (state.leases[deviceId] ?? 0) > timestamp);
+        if (!state || !device) throw new AppError('ไม่พบอุปกรณ์');
+        const peers = state.devices.filter(target => target.id !== deviceId && (state.leases[target.id] ?? 0) > timestamp &&
+          (target.visible && target.group === device.group || device.paired.includes(target.id)))
+          .map(({ id, name, kind }) => ({ id, name, kind }));
+        options.send(deviceId, { type: 'peers', peers, refreshed: true });
+        return;
+      }
       if (message.type === 'signal') {
         const result = await shared.relay(deviceId, message, now());
         if (result === 'ok') return;

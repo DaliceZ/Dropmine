@@ -114,6 +114,37 @@ describe.skipIf(!process.env.TEST_REDIS_URL)('distributed Redis signaling', () =
     expect(counts).toEqual({ get: 4, eval: 2, set: 2, publish: 0 });
   });
 
+  it('refreshes from one read without writes or broadcasts and limits repeated requests', async () => {
+    const first = instance('one');
+    const second = instance('two');
+    const sender = await first.connect('network');
+    const receiver = await second.connect('network');
+    const hidden = await second.connect('other');
+    const expired = await second.connect('network');
+    for (const device of [receiver, expired]) await second.handle(device.id, { type: 'profile', name: 'Phone', visible: true, kind: 'mobile' });
+    await first.handle(sender.id, { type: 'pair', token: hidden.hello.token });
+    const state = JSON.parse((await client.get(stateKey()))!);
+    state.leases[expired.id] = clock;
+    const before = JSON.stringify(state);
+    await client.set(stateKey(), before, { EX: 100 });
+    const counts = await measure(async () => {
+      await first.handle(sender.id, { type: 'refresh-peers' });
+      await expect(first.handle(sender.id, { type: 'refresh-peers' })).rejects.toThrow('10 วินาที');
+    });
+    expect(counts).toEqual({ get: 1, eval: 0, set: 0, publish: 0 });
+    expect(messages.filter(delivery => delivery.message.type === 'peers' && delivery.message.refreshed)).toEqual([
+      { instance: 'one', to: sender.id, message: { type: 'peers', refreshed: true, peers: [
+        expect.objectContaining({ id: receiver.id }), expect.objectContaining({ id: hidden.id }),
+      ] } },
+    ]);
+    expect(await client.get(stateKey())).toBe(before);
+    expect(await client.ttl(stateKey())).toBeLessThanOrEqual(100);
+    clock += 10_000;
+    await expect(first.handle(sender.id, { type: 'refresh-peers' })).resolves.toBeUndefined();
+    clock += 180_000;
+    await expect(first.handle(sender.id, { type: 'refresh-peers' })).rejects.toThrow('ไม่พบอุปกรณ์');
+  });
+
   it('relays in both directions without rewriting state, leases or TTL', async () => {
     const first = instance('one');
     const second = instance('two');

@@ -3,8 +3,10 @@ import { PAIR_TTL, type ClientMessage, type Peer, type ServerMessage } from '../
 import { AppError } from '../../../errors/app-error.js';
 import type { ISessionRepo } from '../../../repos/session.repo.js';
 import type { Device, SendMessage, Transfer } from '../peer.type.js';
+import { initRefreshCooldown } from './refresh-cooldown.js';
 
 export function initPeerService(repo: ISessionRepo, send: SendMessage, iceServers: RTCIceServer[] = []) {
+  const refreshCooldown = initRefreshCooldown();
   const peer = (device: Device): Peer => ({ id: device.id, name: device.name, kind: device.kind });
   const canSee = (device: Device, target: Device) => target.visible && target.group === device.group || device.paired.has(target.id);
   function peerViews(devices: Device[]) {
@@ -52,6 +54,11 @@ export function initPeerService(repo: ISessionRepo, send: SendMessage, iceServer
     handle(deviceId: string, message: ClientMessage) {
       const device = repo.getDevice(deviceId);
       if (!device) throw new AppError('ไม่พบอุปกรณ์');
+      if (message.type === 'refresh-peers') {
+        refreshCooldown(deviceId);
+        send(deviceId, { type: 'peers', peers: JSON.parse(peerViews([device]).get(deviceId)!) as Peer[], refreshed: true });
+        return;
+      }
       if (message.type === 'profile') {
         const previous = peerViews(repo.listDevices().filter(target => target.id === device.id || target.group === device.group || target.paired.has(device.id)));
         Object.assign(device, { name: message.name, visible: message.visible, kind: message.kind });
