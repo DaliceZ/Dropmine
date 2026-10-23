@@ -1,4 +1,11 @@
 export const english: Record<string, string> = {
+  "ดาวน์โหลดทั้งหมด (.zip)": "Download all (.zip)",
+  "กำลังเตรียม ZIP…": "Preparing ZIP…",
+  "ดาวน์โหลด ZIP อีกครั้ง": "Download ZIP again",
+  "ZIP พร้อมแล้ว หากยังไม่เริ่มดาวน์โหลด ให้กดปุ่มอีกครั้ง": "ZIP is ready. If the download hasn't started, tap the button again.",
+  "เตรียม ZIP ไม่สำเร็จ กรุณาลองอีกครั้ง หรือบันทึกแยกไฟล์": "Could not prepare ZIP. Try again or save files individually.",
+  "เปิด ZIP: iPhone ใช้แอป Files · Android ใช้ Files by Google แล้วเลือกแตกไฟล์": "Open ZIP: on iPhone, tap it in Files. On Android, open it in Files by Google and choose Extract.",
+  "รูปและวิดีโอที่แตกไฟล์แล้ว ต้องบันทึกเข้าแกลเลอรีอีกครั้ง": "After extracting, save photos and videos to your gallery separately.",
   รีเฟรช: "Refresh",
   รีเฟรชอุปกรณ์: "Refresh devices",
   กำลังรีเฟรช: "Refreshing",

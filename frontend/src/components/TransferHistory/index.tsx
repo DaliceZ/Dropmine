@@ -1,6 +1,6 @@
 import { usePreferences } from "../../contexts/PreferencesContext";
 import { ArrowDownLeft, ArrowUpRight, ChevronDown, File } from "lucide-react";
-import type { Download, TransferView } from "../../types/dropmine";
+import type { Download, TransferView, ZipDownload } from "../../types/dropmine";
 import {
   formatBytes,
   formatTransferTime,
@@ -14,12 +14,16 @@ export function TransferHistory({
   downloads,
   cancel,
   clearDownloads,
+  zipDownload,
+  prepareZip,
 }: {
   history: TransferView[];
   currentId?: string;
   downloads: Download[];
   cancel: () => void;
   clearDownloads: () => void;
+  zipDownload: ZipDownload;
+  prepareZip: () => void;
 }) {
   const { t, language } = usePreferences();
   return (
@@ -36,6 +40,8 @@ export function TransferHistory({
               downloads={downloads}
               cancel={cancel}
               clearDownloads={clearDownloads}
+              zipDownload={zipDownload}
+              prepareZip={prepareZip}
             />
           ) : (
             <details className="history-entry">

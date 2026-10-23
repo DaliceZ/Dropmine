@@ -431,6 +431,8 @@ export function TransferPage() {
                   history={state.history}
                   currentId={state.transfer?.id}
                   downloads={state.downloads}
+                  zipDownload={state.zipDownload}
+                  prepareZip={service.prepareZip}
                   cancel={service.cancel}
                   clearDownloads={service.clearDownloads}
                 />

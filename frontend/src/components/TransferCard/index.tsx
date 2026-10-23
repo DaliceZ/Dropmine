@@ -12,6 +12,7 @@ import {
 import type {
   Download as DownloadFile,
   TransferView,
+  ZipDownload,
 } from "../../types/dropmine";
 import {
   formatBytes,
@@ -25,11 +26,15 @@ export function TransferCard({
   downloads,
   cancel,
   clearDownloads,
+  zipDownload,
+  prepareZip,
 }: {
   transfer: TransferView;
   downloads: DownloadFile[];
   cancel: () => void;
   clearDownloads: () => void;
+  zipDownload: ZipDownload;
+  prepareZip: () => void;
 }) {
   const { t, language } = usePreferences();
   const card = useRef<HTMLElement>(null);
@@ -121,8 +126,38 @@ export function TransferCard({
         )}
       </div>
 
-      {complete && downloads.length > 0 ? (
+      {complete && receiving && downloads.length > 0 ? (
         <div className="downloads">
+          {downloads.length >= 2 && (
+            <div className="zip-download">
+              {zipDownload.status === "ready" ? (
+                <a className="download-button zip-button" href={zipDownload.url} download={zipDownload.name}>
+                  <Download size={18} aria-hidden="true" />
+                  {t("ดาวน์โหลด ZIP อีกครั้ง")}
+                </a>
+              ) : (
+                <button
+                  className="download-button zip-button"
+                  onClick={prepareZip}
+                  disabled={zipDownload.status === "preparing"}
+                >
+                  {zipDownload.status === "preparing" ? (
+                    <LoaderCircle className="spin" size={18} aria-hidden="true" />
+                  ) : <Download size={18} aria-hidden="true" />}
+                  {t(zipDownload.status === "preparing" ? "กำลังเตรียม ZIP…" : "ดาวน์โหลดทั้งหมด (.zip)")}
+                </button>
+              )}
+              <p role="status" aria-live="polite">
+                {zipDownload.status === "preparing" && t("กำลังเตรียม ZIP…")}
+                {zipDownload.status === "ready" && t("ZIP พร้อมแล้ว หากยังไม่เริ่มดาวน์โหลด ให้กดปุ่มอีกครั้ง")}
+              </p>
+              {zipDownload.status === "error" && (
+                <p className="zip-error" role="alert">{t("เตรียม ZIP ไม่สำเร็จ กรุณาลองอีกครั้ง หรือบันทึกแยกไฟล์")}</p>
+              )}
+              <p>{t("เปิด ZIP: iPhone ใช้แอป Files · Android ใช้ Files by Google แล้วเลือกแตกไฟล์")}</p>
+              <p>{t("รูปและวิดีโอที่แตกไฟล์แล้ว ต้องบันทึกเข้าแกลเลอรีอีกครั้ง")}</p>
+            </div>
+          )}
           <ul className="download-list" aria-label={t("ไฟล์พร้อมบันทึก")}>
             {downloads.map((file, index) => (
               <li key={index} className="download-row">

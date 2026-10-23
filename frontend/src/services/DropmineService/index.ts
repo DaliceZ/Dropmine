@@ -10,6 +10,7 @@ import {
 import type { Snapshot, TransferView } from "../../types/dropmine";
 import { isActive } from "../../utils/file";
 import { resolveSignalingUrl } from "../../config/signaling";
+import { createZipArchive } from "../ZipArchive";
 import {
   loadDeviceName,
   normalizeDeviceName,
@@ -37,6 +38,7 @@ export class Dropmine {
     transfer: null,
     history: [],
     downloads: [],
+    zipDownload: { status: "idle" },
     error: "",
   };
   private listeners = new Set<() => void>();
@@ -62,6 +64,7 @@ export class Dropmine {
   private lastUpdate = 0;
   private pairToken = "";
   private abort = new AbortController();
+  private zipAbort?: AbortController;
 
   constructor() {
     const fragment = new URLSearchParams(location.hash.slice(1));
@@ -207,10 +210,52 @@ export class Dropmine {
   };
   clearError = () => this.update({ error: "" });
   clearDownloads = () => {
+    this.zipAbort?.abort();
+    this.zipAbort = undefined;
+    if (this.state.zipDownload.status === "ready")
+      URL.revokeObjectURL(this.state.zipDownload.url);
     this.state.downloads.forEach((download) =>
       URL.revokeObjectURL(download.url),
     );
-    this.update({ downloads: [] });
+    this.update({ downloads: [], zipDownload: { status: "idle" } });
+  };
+  prepareZip = async () => {
+    const { transfer, downloads, zipDownload } = this.state;
+    if (
+      transfer?.direction !== "receive" || transfer.stage !== "complete" ||
+      downloads.length < 2 || downloads.length !== transfer.files.length ||
+      zipDownload.status === "preparing" || zipDownload.status === "ready"
+    ) return;
+    const controller = new AbortController();
+    this.zipAbort = controller;
+    this.update({ zipDownload: { status: "preparing" } });
+    try {
+      const blob = await createZipArchive(downloads, controller.signal);
+      if (controller.signal.aborted || this.zipAbort !== controller) return;
+      const archive = {
+        status: "ready" as const,
+        name: `dropmine-${transfer.id}.zip`,
+        url: URL.createObjectURL(blob),
+      };
+      this.update({ zipDownload: archive });
+      // Keep a visible link as well: some mobile browsers require a fresh tap.
+      const link = document.createElement("a");
+      link.href = archive.url;
+      link.download = archive.name;
+      try {
+        document.body.append(link);
+        link.click();
+      } catch {
+        // The prepared link remains available if automatic downloading is blocked.
+      } finally {
+        link.remove();
+      }
+    } catch {
+      if (!controller.signal.aborted && this.zipAbort === controller)
+        this.update({ zipDownload: { status: "error" } });
+    } finally {
+      if (this.zipAbort === controller) this.zipAbort = undefined;
+    }
   };
   request = (peer: Peer, files: File[]) => {
     if (isActive(this.state.transfer))
@@ -576,7 +621,7 @@ export class Dropmine {
       this.update({
         downloads: [
           ...this.state.downloads,
-          { ...file, url: URL.createObjectURL(blob) },
+          { ...file, blob, url: URL.createObjectURL(blob) },
         ],
       });
       this.chunks = [];

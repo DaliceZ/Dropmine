@@ -48,6 +48,7 @@ test('light defaults, language and theme persist, English transfers stay localiz
     await expect(incoming.getByText('Total size', { exact: true })).toBeVisible();
     await receiver.getByRole('button', { name: 'Accept files', exact: true }).click();
     await expect(receiver.getByRole('heading', { name: 'Files received', exact: true })).toBeVisible();
+    await expect(receiver.getByRole('button', { name: 'Download all (.zip)', exact: true })).toHaveCount(0);
     await expect(sender.getByRole('heading', { name: 'Files sent', exact: true })).toBeVisible();
     await expect(receiver.getByRole('link', { name: 'Save hello.txt', exact: true })).toBeInViewport();
     await expect(receiver.locator('.completion-toast').getByText('Files received', { exact: true })).toBeVisible();
